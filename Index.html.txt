@@ -1,0 +1,1085 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CSM Dashboard</title>
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/lucide-react/0.263.1/umd/lucide-react.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+        const { 
+            Calendar, Upload, ExternalLink, Search, Filter, Plus, Clock, 
+            AlertCircle, CheckCircle, Users, DollarSign, Target, MessageSquare, 
+            Trash2, X, Download, FileUp, LogOut, LogIn 
+        } = lucide;
+
+        // TODO: Replace with your Firebase config
+        const firebaseConfig = {
+            apiKey: "AIzaSyARCczrXWA0hx2yMyvHSLhsQteLsZ94LqM",
+            authDomain: "csm-dashboard-c8e6a.firebaseapp.com",
+            projectId: "csm-dashboard-c8e6a",
+            storageBucket: "csm-dashboard-c8e6a.firebasestorage.app",
+            messagingSenderId: "817229924980",
+            appId: "G-SHQYW49750"
+        };
+
+        // Initialize Firebase
+        if (!firebase.apps.length) {
+            firebase.initializeApp(firebaseConfig);
+        }
+
+        const db = firebase.firestore();
+        const auth = firebase.auth();
+        const provider = new firebase.auth.GoogleAuthProvider();
+
+        const CSMDashboard = () => {
+            const [user, setUser] = useState(null);
+            const [loading, setLoading] = useState(true);
+            const [accounts, setAccounts] = useState([]);
+            const [todos, setTodos] = useState([]);
+            const [chatMessages, setChatMessages] = useState([]);
+            const [isProcessing, setIsProcessing] = useState(false);
+            const [chatInput, setChatInput] = useState('');
+            const [pendingUpdates, setPendingUpdates] = useState(null);
+            const [showExportModal, setShowExportModal] = useState(false);
+            const [selectedAccount, setSelectedAccount] = useState(null);
+            const [searchTerm, setSearchTerm] = useState('');
+            const [sortBy, setSortBy] = useState('renewalDate');
+
+            // Auth state listener
+            useEffect(() => {
+                const unsubscribe = auth.onAuthStateChanged((user) => {
+                    setUser(user);
+                    setLoading(false);
+                    if (user) {
+                        loadUserData(user.uid);
+                    }
+                });
+                return () => unsubscribe();
+            }, []);
+
+            const signInWithGoogle = async () => {
+                try {
+                    await auth.signInWithPopup(provider);
+                } catch (error) {
+                    console.error('Error signing in:', error);
+                }
+            };
+
+            const signOut = async () => {
+                try {
+                    await auth.signOut();
+                    setAccounts([]);
+                    setTodos([]);
+                    setChatMessages([]);
+                } catch (error) {
+                    console.error('Error signing out:', error);
+                }
+            };
+
+            const loadUserData = async (userId) => {
+                try {
+                    const accountsDoc = await db.collection('users').doc(userId).collection('data').doc('accounts').get();
+                    const todosDoc = await db.collection('users').doc(userId).collection('data').doc('todos').get();
+                    const chatDoc = await db.collection('users').doc(userId).collection('data').doc('chat').get();
+
+                    if (accountsDoc.exists) {
+                        setAccounts(accountsDoc.data().accounts || []);
+                    } else {
+                        // Initialize with sample data for new users
+                        const sampleAccounts = [
+                            {
+                                id: 1,
+                                name: "DVG Team",
+                                renewalDate: "2025-09-13",
+                                arr: 31500,
+                                health: "green",
+                                salesforceId: "001XX000003DHPt",
+                                industry: "Advanced",
+                                csm: "Garrett Ledesma",
+                                atRisk: false,
+                                upsellSentiment: "green",
+                                churnRisk: "green",
+                                userLicenses: 60,
+                                healthScore: 5
+                            }
+                        ];
+                        setAccounts(sampleAccounts);
+                        await saveUserData(userId, 'accounts', { accounts: sampleAccounts });
+                    }
+
+                    if (todosDoc.exists) {
+                        setTodos(todosDoc.data().todos || []);
+                    }
+
+                    if (chatDoc.exists) {
+                        setChatMessages(chatDoc.data().messages || []);
+                    }
+                } catch (error) {
+                    console.error('Error loading user data:', error);
+                }
+            };
+
+            const saveUserData = async (userId, type, data) => {
+                try {
+                    await db.collection('users').doc(userId).collection('data').doc(type).set(data);
+                } catch (error) {
+                    console.error('Error saving data:', error);
+                }
+            };
+
+            // Auto-save data when it changes
+            useEffect(() => {
+                if (user && accounts.length > 0) {
+                    saveUserData(user.uid, 'accounts', { accounts });
+                }
+            }, [accounts, user]);
+
+            useEffect(() => {
+                if (user && todos.length > 0) {
+                    saveUserData(user.uid, 'todos', { todos });
+                }
+            }, [todos, user]);
+
+            const today = new Date();
+            const next90Days = new Date(today.getTime() + 90 * 24 * 60 * 60 * 1000);
+
+            const renewalsNext90Days = accounts.filter(account => {
+                const renewalDate = new Date(account.renewalDate);
+                return renewalDate >= today && renewalDate <= next90Days;
+            });
+
+            const getHealthColor = (health) => {
+                switch(health) {
+                    case 'green': return 'bg-green-100 text-green-800 border-green-200';
+                    case 'yellow': return 'bg-yellow-100 text-yellow-800 border-yellow-200';
+                    case 'red': return 'bg-red-100 text-red-800 border-red-200';
+                    default: return 'bg-gray-100 text-gray-800 border-gray-200';
+                }
+            };
+
+            const getPriorityColor = (priority) => {
+                switch(priority) {
+                    case 'now': return 'bg-red-50 border-red-200';
+                    case 'next': return 'bg-yellow-50 border-yellow-200';
+                    case 'later': return 'bg-green-50 border-green-200';
+                    default: return 'bg-gray-50 border-gray-200';
+                }
+            };
+
+            const getDaysUntilRenewal = (renewalDate) => {
+                const renewal = new Date(renewalDate);
+                const diffTime = renewal - today;
+                const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+                return diffDays;
+            };
+
+            const formatDate = (dateString) => {
+                return new Date(dateString).toLocaleDateString('en-US', { 
+                    month: 'short', 
+                    day: 'numeric', 
+                    year: 'numeric' 
+                });
+            };
+
+            const handleFileUpload = async (event) => {
+                const file = event.target.files[0];
+                if (file) {
+                    setIsProcessing(true);
+                    
+                    try {
+                        let fileContent;
+                        
+                        if (file.name.endsWith('.xlsx') || file.name.endsWith('.xls')) {
+                            const arrayBuffer = await file.arrayBuffer();
+                            fileContent = `Excel file uploaded: ${file.name}\nFile size: ${file.size} bytes\nThis appears to be a Salesforce report that needs to be processed.`;
+                        } else {
+                            fileContent = await file.text();
+                        }
+                        
+                        const userMessage = {
+                            id: Date.now(),
+                            type: 'user',
+                            content: `Uploaded: ${file.name}`,
+                            file: file.name,
+                            timestamp: new Date()
+                        };
+                        
+                        setChatMessages(prev => [...prev, userMessage]);
+                        await processWithClaude(fileContent, file.name);
+                        
+                    } catch (error) {
+                        console.error('Error processing file:', error);
+                        const errorMessage = {
+                            id: Date.now() + 1,
+                            type: 'assistant',
+                            content: `Sorry, I encountered an error processing ${file.name}. Please try again or upload a different format.`,
+                            timestamp: new Date()
+                        };
+                        setChatMessages(prev => [...prev, errorMessage]);
+                    } finally {
+                        setIsProcessing(false);
+                    }
+                }
+            };
+
+            const processWithClaude = async (content, filename) => {
+                try {
+                    const response = await fetch("https://api.anthropic.com/v1/messages", {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json",
+                        },
+                        body: JSON.stringify({
+                            model: "claude-sonnet-4-20250514",
+                            max_tokens: 2000,
+                            messages: [
+                                {
+                                    role: "user",
+                                    content: `I'm a Customer Success Manager and I've uploaded a Salesforce report (${filename}). Please analyze this data and help me update my CSM dashboard.
+
+Current accounts in my dashboard: ${accounts.map(a => a.name).join(', ')}
+
+Here's the file content:
+${content}
+
+Please analyze this data and respond with a JSON object that includes:
+1. "summary" - A conversational summary of what you found
+2. "newAccounts" - Array of any accounts not currently in my dashboard
+3. "accountUpdates" - Array of updates to existing accounts  
+4. "newTasks" - Array of new tasks/action items to add
+5. "insights" - Key insights and recommendations
+
+For each new account, include: name, renewalDate, arr, health, industry, salesforceId (generate if not present), atRisk, upsellSentiment, churnRisk, userLicenses, healthScore
+
+Format your response as:
+{
+  "summary": "conversational summary here",
+  "newAccounts": [...],
+  "accountUpdates": [...],
+  "newTasks": [...],
+  "insights": "key insights"
+}
+
+IMPORTANT: Your entire response must be valid JSON only. Do not include any text outside the JSON structure.`
+                                }
+                            ]
+                        })
+                    });
+
+                    if (!response.ok) {
+                        throw new Error(`API request failed: ${response.status}`);
+                    }
+
+                    const data = await response.json();
+                    let claudeResponse = data.content[0].text;
+                    
+                    claudeResponse = claudeResponse.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+
+                    try {
+                        const parsedResponse = JSON.parse(claudeResponse);
+                        
+                        const assistantMessage = {
+                            id: Date.now() + 2,
+                            type: 'assistant',
+                            content: parsedResponse.summary + (parsedResponse.insights ? `\n\n${parsedResponse.insights}` : ''),
+                            timestamp: new Date()
+                        };
+
+                        setChatMessages(prev => [...prev, assistantMessage]);
+
+                        if (parsedResponse.newAccounts?.length > 0 || parsedResponse.accountUpdates?.length > 0 || parsedResponse.newTasks?.length > 0) {
+                            setPendingUpdates(parsedResponse);
+                            
+                            const approvalMessage = {
+                                id: Date.now() + 3,
+                                type: 'assistant',
+                                content: `I found some updates to apply:\n\n${
+                                    parsedResponse.newAccounts?.length > 0 ? `📝 ${parsedResponse.newAccounts.length} new accounts to add\n` : ''
+                                }${
+                                    parsedResponse.accountUpdates?.length > 0 ? `🔄 ${parsedResponse.accountUpdates.length} existing accounts to update\n` : ''
+                                }${
+                                    parsedResponse.newTasks?.length > 0 ? `✅ ${parsedResponse.newTasks.length} new tasks to add\n` : ''
+                                }\nWould you like me to apply these updates? Type "yes" to approve or "no" to cancel.`,
+                                timestamp: new Date(),
+                                requiresApproval: true
+                            };
+
+                            setChatMessages(prev => [...prev, approvalMessage]);
+                        }
+
+                    } catch (parseError) {
+                        console.error('Error parsing Claude response:', parseError);
+                        
+                        const assistantMessage = {
+                            id: Date.now() + 2,
+                            type: 'assistant',
+                            content: claudeResponse,
+                            timestamp: new Date()
+                        };
+
+                        setChatMessages(prev => [...prev, assistantMessage]);
+                    }
+
+                } catch (error) {
+                    console.error('Error calling Claude API:', error);
+                    const errorMessage = {
+                        id: Date.now() + 3,
+                        type: 'assistant',
+                        content: `I had trouble processing that file. The error was: ${error.message}. Would you like to try uploading again or ask me a specific question about your accounts?`,
+                        timestamp: new Date()
+                    };
+                    setChatMessages(prev => [...prev, errorMessage]);
+                }
+            };
+
+            const sendChatMessage = async () => {
+                if (!chatInput.trim()) return;
+
+                const userMessage = {
+                    id: Date.now(),
+                    type: 'user',
+                    content: chatInput,
+                    timestamp: new Date()
+                };
+
+                setChatMessages(prev => [...prev, userMessage]);
+                const currentInput = chatInput;
+                setChatInput('');
+                setIsProcessing(true);
+
+                try {
+                    if (pendingUpdates && (currentInput.toLowerCase().includes('yes') || currentInput.toLowerCase().includes('approve'))) {
+                        await applyPendingUpdates();
+                        setPendingUpdates(null);
+                        setIsProcessing(false);
+                        return;
+                    }
+
+                    if (pendingUpdates && (currentInput.toLowerCase().includes('no') || currentInput.toLowerCase().includes('cancel'))) {
+                        setPendingUpdates(null);
+                        const cancelMessage = {
+                            id: Date.now() + 1,
+                            type: 'assistant',
+                            content: "Updates cancelled. Your dashboard remains unchanged. Feel free to upload another report or ask me anything else!",
+                            timestamp: new Date()
+                        };
+                        setChatMessages(prev => [...prev, cancelMessage]);
+                        setIsProcessing(false);
+                        return;
+                    }
+
+                    const conversationHistory = chatMessages.slice(-10).map(msg => ({
+                        role: msg.type === 'user' ? 'user' : 'assistant',
+                        content: msg.content
+                    }));
+
+                    const response = await fetch("https://api.anthropic.com/v1/messages", {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json",
+                        },
+                        body: JSON.stringify({
+                            model: "claude-sonnet-4-20250514",
+                            max_tokens: 2000,
+                            messages: [
+                                ...conversationHistory,
+                                {
+                                    role: "user",
+                                    content: `${currentInput}
+
+Current Dashboard Context:
+- I have ${accounts.length} accounts in my portfolio
+- ${renewalsNext90Days.length} renewals coming up in the next 90 days
+- ${todos.filter(t => !t.completed).length} open tasks
+- Total ARR: $${accounts.reduce((sum, acc) => sum + acc.arr, 0).toLocaleString()}
+
+Here are my current accounts: ${accounts.map(a => `${a.name} (ARR: $${a.arr}, Renewal: ${a.renewalDate}, Health: ${a.health})`).join(', ')}
+
+Please provide helpful insights and suggestions for managing my CSM portfolio. Be conversational and actionable.`
+                                }
+                            ]
+                        })
+                    });
+
+                    if (!response.ok) {
+                        throw new Error(`API request failed: ${response.status}`);
+                    }
+
+                    const data = await response.json();
+                    const claudeResponse = data.content[0].text;
+
+                    const assistantMessage = {
+                        id: Date.now() + 1,
+                        type: 'assistant',
+                        content: claudeResponse,
+                        timestamp: new Date()
+                    };
+
+                    setChatMessages(prev => [...prev, assistantMessage]);
+
+                } catch (error) {
+                    console.error('Error in chat:', error);
+                    const errorMessage = {
+                        id: Date.now() + 2,
+                        type: 'assistant',
+                        content: `I encountered an error: ${error.message}. Please try your question again.`,
+                        timestamp: new Date()
+                    };
+                    setChatMessages(prev => [...prev, errorMessage]);
+                } finally {
+                    setIsProcessing(false);
+                }
+            };
+
+            const applyPendingUpdates = async () => {
+                if (!pendingUpdates) return;
+
+                let updatesApplied = [];
+
+                if (pendingUpdates.newAccounts?.length > 0) {
+                    const newAccountsWithIds = pendingUpdates.newAccounts.map(account => ({
+                        ...account,
+                        id: Math.max(...accounts.map(a => a.id), 0) + Math.random() * 1000,
+                        salesforceId: account.salesforceId || `001XX${Date.now()}`,
+                        csm: account.csm || "Garrett Ledesma"
+                    }));
+                    
+                    setAccounts(prev => [...prev, ...newAccountsWithIds]);
+                    updatesApplied.push(`Added ${newAccountsWithIds.length} new accounts`);
+                }
+
+                if (pendingUpdates.accountUpdates?.length > 0) {
+                    setAccounts(prev => prev.map(account => {
+                        const update = pendingUpdates.accountUpdates.find(u => u.name === account.name || u.id === account.id);
+                        return update ? { ...account, ...update } : account;
+                    }));
+                    updatesApplied.push(`Updated ${pendingUpdates.accountUpdates.length} existing accounts`);
+                }
+
+                if (pendingUpdates.newTasks?.length > 0) {
+                    const newTasksWithIds = pendingUpdates.newTasks.map(task => ({
+                        ...task,
+                        id: Math.max(...todos.map(t => t.id), 0) + Math.random() * 1000,
+                        completed: false
+                    }));
+                    
+                    setTodos(prev => [...prev, ...newTasksWithIds]);
+                    updatesApplied.push(`Added ${newTasksWithIds.length} new tasks`);
+                }
+
+                const successMessage = {
+                    id: Date.now() + 1,
+                    type: 'assistant',
+                    content: `✅ Updates applied successfully!\n\n${updatesApplied.join('\n')}\n\nYour dashboard has been updated with the latest information from your Salesforce report.`,
+                    timestamp: new Date()
+                };
+
+                setChatMessages(prev => [...prev, successMessage]);
+            };
+
+            const filteredAccounts = accounts.filter(account =>
+                account.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                account.industry.toLowerCase().includes(searchTerm.toLowerCase())
+            );
+
+            const sortedAccounts = [...filteredAccounts].sort((a, b) => {
+                if (sortBy === 'renewalDate') {
+                    return new Date(a.renewalDate) - new Date(b.renewalDate);
+                } else if (sortBy === 'arr') {
+                    return b.arr - a.arr;
+                } else if (sortBy === 'name') {
+                    return a.name.localeCompare(b.name);
+                }
+                return 0;
+            });
+
+            const todosByPriority = {
+                now: todos.filter(t => t.priority === 'now' && !t.completed),
+                next: todos.filter(t => t.priority === 'next' && !t.completed),
+                later: todos.filter(t => t.priority === 'later' && !t.completed)
+            };
+
+            const toggleTodo = (todoId) => {
+                setTodos(todos.map(todo =>
+                    todo.id === todoId ? { ...todo, completed: !todo.completed } : todo
+                ));
+            };
+
+            const removeAccount = (accountId) => {
+                if (window.confirm('Are you sure you want to remove this account?')) {
+                    setAccounts(accounts.filter(account => account.id !== accountId));
+                    setTodos(todos.filter(todo => todo.accountId !== accountId));
+                }
+            };
+
+            const exportData = (type = 'all') => {
+                let dataToExport = {};
+                const timestamp = new Date().toISOString().split('T')[0];
+                
+                switch(type) {
+                    case 'accounts':
+                        dataToExport = { accounts, exportDate: new Date().toISOString(), type: 'accounts' };
+                        downloadJSON(dataToExport, `csm-accounts-${timestamp}.json`);
+                        break;
+                    case 'tasks':
+                        dataToExport = { todos, exportDate: new Date().toISOString(), type: 'tasks' };
+                        downloadJSON(dataToExport, `csm-tasks-${timestamp}.json`);
+                        break;
+                    default:
+                        dataToExport = { 
+                            accounts, 
+                            todos, 
+                            exportDate: new Date().toISOString(), 
+                            type: 'complete',
+                            version: '1.0'
+                        };
+                        downloadJSON(dataToExport, `csm-dashboard-backup-${timestamp}.json`);
+                }
+            };
+
+            const downloadJSON = (data, filename) => {
+                const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            };
+
+            const handleImport = (event) => {
+                const file = event.target.files[0];
+                if (file && file.type === 'application/json') {
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        try {
+                            const importedData = JSON.parse(e.target.result);
+                            
+                            if (importedData.type === 'complete') {
+                                setAccounts(importedData.accounts || []);
+                                setTodos(importedData.todos || []);
+                                alert('Complete dashboard restored successfully!');
+                            } else if (importedData.type === 'accounts') {
+                                setAccounts(importedData.accounts || []);
+                                alert('Accounts imported successfully!');
+                            } else if (importedData.type === 'tasks') {
+                                setTodos(importedData.todos || []);
+                                alert('Tasks imported successfully!');
+                            } else {
+                                alert('Unknown backup format. Please use a valid CSM Dashboard backup file.');
+                            }
+                        } catch (error) {
+                            alert('Error importing file. Please check the file format.');
+                        }
+                    };
+                    reader.readAsText(file);
+                } else {
+                    alert('Please select a valid JSON backup file.');
+                }
+            };
+
+            if (loading) {
+                return (
+                    <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+                        <div className="text-center">
+                            <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-600 mx-auto"></div>
+                            <p className="mt-4 text-gray-600">Loading your dashboard...</p>
+                        </div>
+                    </div>
+                );
+            }
+
+            if (!user) {
+                return (
+                    <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+                        <div className="bg-white p-8 rounded-lg shadow-md text-center max-w-md">
+                            <h1 className="text-2xl font-bold text-gray-900 mb-4">CSM Dashboard</h1>
+                            <p className="text-gray-600 mb-6">Sign in with your Google account to access your customer success portfolio.</p>
+                            <button
+                                onClick={signInWithGoogle}
+                                className="flex items-center justify-center w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                            >
+                                <LogIn className="h-4 w-4 mr-2" />
+                                Sign in with Google
+                            </button>
+                        </div>
+                    </div>
+                );
+            }
+
+            return (
+                <div className="min-h-screen bg-gray-50 p-6">
+                    <div className="max-w-7xl mx-auto">
+                        {/* Header */}
+                        <div className="mb-8 flex justify-between items-start">
+                            <div>
+                                <h1 className="text-3xl font-bold text-gray-900 mb-2">CSM Dashboard</h1>
+                                <p className="text-gray-600">Welcome back, {user.displayName}</p>
+                            </div>
+                            
+                            {/* Controls */}
+                            <div className="flex items-center space-x-2">
+                                <button
+                                    onClick={() => setShowExportModal(true)}
+                                    className="flex items-center px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+                                >
+                                    <Download className="h-4 w-4 mr-1" />
+                                    Export
+                                </button>
+                                
+                                <input
+                                    type="file"
+                                    accept=".json"
+                                    onChange={handleImport}
+                                    className="hidden"
+                                    id="import-file"
+                                />
+                                <label
+                                    htmlFor="import-file"
+                                    className="flex items-center px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors cursor-pointer"
+                                >
+                                    <FileUp className="h-4 w-4 mr-1" />
+                                    Import
+                                </label>
+
+                                <button
+                                    onClick={signOut}
+                                    className="flex items-center px-3 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
+                                >
+                                    <LogOut className="h-4 w-4 mr-1" />
+                                    Sign Out
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Key Metrics */}
+                        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+                            <div className="bg-white p-6 rounded-lg shadow-sm border">
+                                <div className="flex items-center">
+                                    <Users className="h-8 w-8 text-blue-600 mr-3" />
+                                    <div>
+                                        <p className="text-sm font-medium text-gray-600">Total Accounts</p>
+                                        <p className="text-2xl font-bold text-gray-900">{accounts.length}</p>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div className="bg-white p-6 rounded-lg shadow-sm border">
+                                <div className="flex items-center">
+                                    <Calendar className="h-8 w-8 text-orange-600 mr-3" />
+                                    <div>
+                                        <p className="text-sm font-medium text-gray-600">Renewals (90d)</p>
+                                        <p className="text-2xl font-bold text-gray-900">{renewalsNext90Days.length}</p>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div className="bg-white p-6 rounded-lg shadow-sm border">
+                                <div className="flex items-center">
+                                    <DollarSign className="h-8 w-8 text-green-600 mr-3" />
+                                    <div>
+                                        <p className="text-sm font-medium text-gray-600">Renewal ARR</p>
+                                        <p className="text-2xl font-bold text-gray-900">
+                                            ${renewalsNext90Days.reduce((sum, acc) => sum + acc.arr, 0).toLocaleString()}
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div className="bg-white p-6 rounded-lg shadow-sm border">
+                                <div className="flex items-center">
+                                    <Target className="h-8 w-8 text-purple-600 mr-3" />
+                                    <div>
+                                        <p className="text-sm font-medium text-gray-600">Open Tasks</p>
+                                        <p className="text-2xl font-bold text-gray-900">{todos.filter(t => !t.completed).length}</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Smart Document Processing & Chat */}
+                        <div className="bg-white p-6 rounded-lg shadow-sm border mb-8">
+                            <h2 className="text-xl font-semibold text-gray-900 mb-4 flex items-center">
+                                <MessageSquare className="h-5 w-5 mr-2" />
+                                Smart Document Processing & CSM Chat
+                            </h2>
+                            
+                            {/* File Upload Area */}
+                            <div className="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center mb-6">
+                                <input
+                                    type="file"
+                                    accept=".txt,.doc,.docx,.pdf,.eml,.xlsx,.xls,.csv"
+                                    onChange={handleFileUpload}
+                                    className="hidden"
+                                    id="file-upload"
+                                />
+                                <label htmlFor="file-upload" className="cursor-pointer">
+                                    <Upload className="h-8 w-8 text-gray-400 mx-auto mb-2" />
+                                    <p className="text-sm font-medium text-gray-900 mb-1">Upload Salesforce Reports or Documents</p>
+                                    <p className="text-xs text-gray-600">Drag & drop or click to upload Excel, CSV, or text files</p>
+                                    <div className="mt-2">
+                                        <span className="bg-blue-600 text-white px-3 py-1 rounded text-sm hover:bg-blue-700 transition-colors">
+                                            Choose File
+                                        </span>
+                                    </div>
+                                </label>
+                            </div>
+
+                            {/* Chat Interface */}
+                            <div className="border border-gray-200 rounded-lg">
+                                {/* Chat Messages */}
+                                {chatMessages.length > 0 && (
+                                    <div className="h-64 overflow-y-auto p-4 bg-gray-50 border-b">
+                                        {chatMessages.map(message => (
+                                            <div key={message.id} className={`mb-4 ${message.type === 'user' ? 'text-right' : 'text-left'}`}>
+                                                <div className={`inline-block max-w-3/4 p-3 rounded-lg ${
+                                                    message.type === 'user' 
+                                                        ? 'bg-blue-600 text-white' 
+                                                        : message.requiresApproval
+                                                        ? 'bg-yellow-50 border border-yellow-200 text-gray-900'
+                                                        : 'bg-white border border-gray-200 text-gray-900'
+                                                }`}>
+                                                    <p className="text-sm whitespace-pre-wrap">{message.content}</p>
+                                                    <p className={`text-xs mt-1 ${
+                                                        message.type === 'user' ? 'text-blue-100' : 'text-gray-500'
+                                                    }`}>
+                                                        {message.timestamp.toLocaleTimeString()}
+                                                    </p>
+                                                </div>
+                                            </div>
+                                        ))}
+                                        {isProcessing && (
+                                            <div className="text-left mb-4">
+                                                <div className="inline-block bg-gray-100 p-3 rounded-lg">
+                                                    <p className="text-sm text-gray-600">Processing your request...</p>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+
+                                {/* Chat Input */}
+                                <div className="p-4">
+                                    <div className="flex space-x-2">
+                                        <input
+                                            type="text"
+                                            value={chatInput}
+                                            onChange={(e) => setChatInput(e.target.value)}
+                                            onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && sendChatMessage()}
+                                            placeholder="Ask me about your accounts, upload reports, or request updates..."
+                                            className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                            disabled={isProcessing}
+                                        />
+                                        <button
+                                            onClick={sendChatMessage}
+                                            disabled={isProcessing || !chatInput.trim()}
+                                            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                                        >
+                                            Send
+                                        </button>
+                                    </div>
+                                    <p className="text-xs text-gray-500 mt-2">
+                                        💡 Try: "Update my accounts with the latest data" or upload a Salesforce report
+                                        {pendingUpdates && (
+                                            <span className="block text-yellow-600 font-medium mt-1">
+                                                ⚠️ Pending updates require approval - type "yes" or "no"
+                                            </span>
+                                        )}
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
+                            {/* Renewals Next 90 Days */}
+                            <div className="bg-white p-6 rounded-lg shadow-sm border">
+                                <h2 className="text-xl font-semibold text-gray-900 mb-4 flex items-center">
+                                    <Calendar className="h-5 w-5 mr-2" />
+                                    Renewals Next 90 Days
+                                </h2>
+                                <div className="space-y-3">
+                                    {renewalsNext90Days.map(account => {
+                                        const daysLeft = getDaysUntilRenewal(account.renewalDate);
+                                        return (
+                                            <div key={account.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                                                <div className="flex-1">
+                                                    <h3 className="font-medium text-gray-900">{account.name}</h3>
+                                                    <div className="flex items-center space-x-4 mt-1">
+                                                        <span className="text-sm text-gray-600">{formatDate(account.renewalDate)}</span>
+                                                        <span className={`text-xs px-2 py-1 rounded-full border ${getHealthColor(account.health)}`}>
+                                                            {account.health}
+                                                        </span>
+                                                        {account.atRisk && (
+                                                            <span className="text-xs px-2 py-1 rounded-full bg-red-100 text-red-800 border border-red-200">
+                                                                At Risk
+                                                            </span>
+                                                        )}
+                                                        <span className="text-sm font-medium text-gray-900">
+                                                            ${account.arr.toLocaleString()}
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                                <div className="flex items-center space-x-2">
+                                                    <span className={`text-sm font-medium px-2 py-1 rounded ${
+                                                        daysLeft <= 30 ? 'bg-red-100 text-red-800' :
+                                                        daysLeft <= 60 ? 'bg-yellow-100 text-yellow-800' :
+                                                        'bg-green-100 text-green-800'
+                                                    }`}>
+                                                        {daysLeft}d
+                                                    </span>
+                                                    <button
+                                                        onClick={() => window.open(`https://your-instance.salesforce.com/lightning/r/Account/${account.salesforceId}/view`, '_blank')}
+                                                        className="p-1 text-blue-600 hover:text-blue-800"
+                                                        title="Open in Salesforce"
+                                                    >
+                                                        <ExternalLink className="h-4 w-4" />
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+
+                            {/* Priority Tasks */}
+                            <div className="bg-white p-6 rounded-lg shadow-sm border">
+                                <h2 className="text-xl font-semibold text-gray-900 mb-4 flex items-center">
+                                    <Clock className="h-5 w-5 mr-2" />
+                                    Priority Matrix
+                                </h2>
+                                <div className="space-y-4">
+                                    {['now', 'next', 'later'].map(priority => (
+                                        <div key={priority} className={`p-4 rounded-lg border ${getPriorityColor(priority)}`}>
+                                            <h3 className="font-medium text-gray-900 mb-2 capitalize flex items-center">
+                                                {priority === 'now' && <AlertCircle className="h-4 w-4 mr-1 text-red-600" />}
+                                                {priority === 'next' && <Clock className="h-4 w-4 mr-1 text-yellow-600" />}
+                                                {priority === 'later' && <CheckCircle className="h-4 w-4 mr-1 text-green-600" />}
+                                                {priority} ({todosByPriority[priority].length})
+                                            </h3>
+                                            <div className="space-y-2">
+                                                {todosByPriority[priority].slice(0, 3).map(todo => (
+                                                    <div key={todo.id} className="flex items-center space-x-2">
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={todo.completed}
+                                                            onChange={() => toggleTodo(todo.id)}
+                                                            className="rounded"
+                                                        />
+                                                        <span className="text-sm text-gray-700 flex-1">{todo.task}</span>
+                                                        <span className="text-xs text-gray-500">{formatDate(todo.dueDate)}</span>
+                                                    </div>
+                                                ))}
+                                                {todosByPriority[priority].length > 3 && (
+                                                    <p className="text-xs text-gray-500">+{todosByPriority[priority].length - 3} more</p>
+                                                )}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Accounts Management */}
+                        <div className="bg-white p-6 rounded-lg shadow-sm border">
+                            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6">
+                                <h2 className="text-xl font-semibold text-gray-900 flex items-center mb-4 sm:mb-0">
+                                    <Users className="h-5 w-5 mr-2" />
+                                    Account Portfolio
+                                </h2>
+                                <div className="flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-4">
+                                    <div className="relative">
+                                        <Search className="h-4 w-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
+                                        <input
+                                            type="text"
+                                            placeholder="Search accounts..."
+                                            value={searchTerm}
+                                            onChange={(e) => setSearchTerm(e.target.value)}
+                                            className="pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                        />
+                                    </div>
+                                    <select
+                                        value={sortBy}
+                                        onChange={(e) => setSortBy(e.target.value)}
+                                        className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                    >
+                                        <option value="renewalDate">Sort by Renewal</option>
+                                        <option value="arr">Sort by ARR</option>
+                                        <option value="name">Sort by Name</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                                {sortedAccounts.map(account => (
+                                    <div key={account.id} className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow relative">
+                                        <div className="flex items-start justify-between mb-3">
+                                            <h3 className="font-semibold text-gray-900 pr-8">{account.name}</h3>
+                                            <div className="flex items-center space-x-1">
+                                                <button
+                                                    onClick={() => window.open(`https://your-instance.salesforce.com/lightning/r/Account/${account.salesforceId}/view`, '_blank')}
+                                                    className="text-blue-600 hover:text-blue-800"
+                                                    title="Open in Salesforce"
+                                                >
+                                                    <ExternalLink className="h-4 w-4" />
+                                                </button>
+                                                <button
+                                                    onClick={() => removeAccount(account.id)}
+                                                    className="text-red-600 hover:text-red-800"
+                                                    title="Remove Account"
+                                                >
+                                                    <Trash2 className="h-4 w-4" />
+                                                </button>
+                                            </div>
+                                        </div>
+                                        
+                                        <div className="space-y-2 text-sm">
+                                            <div className="flex justify-between">
+                                                <span className="text-gray-600">Industry:</span>
+                                                <span className="font-medium">{account.industry}</span>
+                                            </div>
+                                            <div className="flex justify-between">
+                                                <span className="text-gray-600">ARR:</span>
+                                                <span className="font-medium">${account.arr.toLocaleString()}</span>
+                                            </div>
+                                            <div className="flex justify-between">
+                                                <span className="text-gray-600">Renewal:</span>
+                                                <span className="font-medium">{formatDate(account.renewalDate)}</span>
+                                            </div>
+                                            <div className="flex justify-between items-center">
+                                                <span className="text-gray-600">Health:</span>
+                                                <div className="flex items-center space-x-2">
+                                                    <span className={`text-xs px-2 py-1 rounded-full border font-medium ${getHealthColor(account.health)}`}>
+                                                        {account.health}
+                                                    </span>
+                                                    {account.atRisk && (
+                                                        <span className="text-xs px-2 py-1 rounded-full bg-red-100 text-red-800 border border-red-200 font-medium">
+                                                            At Risk
+                                                        </span>
+                                                    )}
+                                                </div>
+                                            </div>
+                                            <div className="flex justify-between items-center">
+                                                <span className="text-gray-600">Upsell:</span>
+                                                <span className={`text-xs px-2 py-1 rounded-full border font-medium ${getHealthColor(account.upsellSentiment)}`}>
+                                                    {account.upsellSentiment}
+                                                </span>
+                                            </div>
+                                            <div className="flex justify-between items-center">
+                                                <span className="text-gray-600">Churn Risk:</span>
+                                                <span className={`text-xs px-2 py-1 rounded-full border font-medium ${getHealthColor(account.churnRisk)}`}>
+                                                    {account.churnRisk}
+                                                </span>
+                                            </div>
+                                        </div>
+
+                                        <div className="mt-4 pt-3 border-t border-gray-200">
+                                            <p className="text-xs text-gray-500 mb-2">Open Tasks:</p>
+                                            {['now', 'next', 'later'].map(priority => {
+                                                const accountTasks = todos.filter(t => t.accountId === account.id && !t.completed && t.priority === priority);
+                                                if (accountTasks.length === 0) return null;
+                                                return (
+                                                    <div key={priority} className="mb-2">
+                                                        <div className="flex items-center mb-1">
+                                                            <span className={`text-xs px-2 py-0.5 rounded font-medium capitalize mr-2 ${
+                                                                priority === 'now' ? 'bg-red-100 text-red-700' :
+                                                                priority === 'next' ? 'bg-yellow-100 text-yellow-700' :
+                                                                'bg-green-100 text-green-700'
+                                                            }`}>
+                                                                {priority}
+                                                            </span>
+                                                            <span className="text-xs text-gray-500">({accountTasks.length})</span>
+                                                        </div>
+                                                        {accountTasks.slice(0, 2).map(todo => (
+                                                            <div key={todo.id} className="flex items-center text-xs text-gray-600 mb-1 ml-2">
+                                                                <input
+                                                                    type="checkbox"
+                                                                    checked={todo.completed}
+                                                                    onChange={() => toggleTodo(todo.id)}
+                                                                    className="mr-2 h-3 w-3"
+                                                                />
+                                                                <span className="flex-1">{todo.task}</span>
+                                                            </div>
+                                                        ))}
+                                                        {accountTasks.length > 2 && (
+                                                            <div className="text-xs text-gray-500 ml-2">+{accountTasks.length - 2} more</div>
+                                                        )}
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+
+                        {/* Export Modal */}
+                        {showExportModal && (
+                            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                                <div className="bg-white rounded-lg p-6 w-96">
+                                    <div className="flex justify-between items-center mb-4">
+                                        <h3 className="text-lg font-semibold">Export Data</h3>
+                                        <button
+                                            onClick={() => setShowExportModal(false)}
+                                            className="text-gray-400 hover:text-gray-600"
+                                        >
+                                            <X className="h-5 w-5" />
+                                        </button>
+                                    </div>
+                                    
+                                    <div className="space-y-3">
+                                        <button
+                                            onClick={() => { exportData('all'); setShowExportModal(false); }}
+                                            className="w-full text-left p-3 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+                                        >
+                                            <div className="font-medium">Complete Backup</div>
+                                            <div className="text-sm text-gray-600">All accounts, tasks, and settings</div>
+                                        </button>
+                                        
+                                        <button
+                                            onClick={() => { exportData('accounts'); setShowExportModal(false); }}
+                                            className="w-full text-left p-3 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+                                        >
+                                            <div className="font-medium">Accounts Only</div>
+                                            <div className="text-sm text-gray-600">Just your account portfolio</div>
+                                        </button>
+                                        
+                                        <button
+                                            onClick={() => { exportData('tasks'); setShowExportModal(false); }}
+                                            className="w-full text-left p-3 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+                                        >
+                                            <div className="font-medium">Tasks Only</div>
+                                            <div className="text-sm text-gray-600">All tasks and priorities</div>
+                                        </button>
+                                    </div>
+                                    
+                                    <div className="mt-4 p-3 bg-blue-50 rounded-lg">
+                                        <p className="text-sm text-blue-800">
+                                            💡 Your data is automatically synced to Firebase. Use exports for backups or sharing.
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        };
+
+        ReactDOM.render(<CSMDashboard />, document.getElementById('root'));
+    </script>
+</body>
+</html>
