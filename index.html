@@ -7,7 +7,6 @@
     <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    <script src="https://unpkg.com/lucide-react@0.263.1/dist/umd/lucide-react.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
@@ -18,11 +17,57 @@
 
     <script type="text/babel">
         const { useState, useEffect } = React;
-        const { 
-            Calendar, Upload, ExternalLink, Search, Filter, Plus, Clock, 
-            AlertCircle, CheckCircle, Users, DollarSign, Target, MessageSquare, 
-            Trash2, X, Download, FileUp, LogOut, LogIn 
-        } = LucideReact;
+        
+        // Simple icon components to replace Lucide
+        const Icon = ({ name, className = "h-4 w-4" }) => {
+            const icons = {
+                calendar: "📅",
+                upload: "📤",
+                external: "🔗",
+                search: "🔍",
+                users: "👥",
+                dollar: "💰",
+                target: "🎯",
+                message: "💬",
+                trash: "🗑️",
+                x: "✕",
+                download: "⬇️",
+                fileup: "📁",
+                logout: "👋",
+                login: "🔓",
+                clock: "⏰",
+                alert: "⚠️",
+                check: "✅",
+                plus: "➕",
+                filter: "🔽"
+            };
+            
+            return React.createElement('span', { 
+                className: `inline-block ${className}`,
+                style: { fontSize: '1em' }
+            }, icons[name] || "•");
+        };
+
+        // Icon shortcuts
+        const Calendar = (props) => Icon({ name: 'calendar', ...props });
+        const Upload = (props) => Icon({ name: 'upload', ...props });
+        const ExternalLink = (props) => Icon({ name: 'external', ...props });
+        const Search = (props) => Icon({ name: 'search', ...props });
+        const Users = (props) => Icon({ name: 'users', ...props });
+        const DollarSign = (props) => Icon({ name: 'dollar', ...props });
+        const Target = (props) => Icon({ name: 'target', ...props });
+        const MessageSquare = (props) => Icon({ name: 'message', ...props });
+        const Trash2 = (props) => Icon({ name: 'trash', ...props });
+        const X = (props) => Icon({ name: 'x', ...props });
+        const Download = (props) => Icon({ name: 'download', ...props });
+        const FileUp = (props) => Icon({ name: 'fileup', ...props });
+        const LogOut = (props) => Icon({ name: 'logout', ...props });
+        const LogIn = (props) => Icon({ name: 'login', ...props });
+        const Clock = (props) => Icon({ name: 'clock', ...props });
+        const AlertCircle = (props) => Icon({ name: 'alert', ...props });
+        const CheckCircle = (props) => Icon({ name: 'check', ...props });
+        const Plus = (props) => Icon({ name: 'plus', ...props });
+        const Filter = (props) => Icon({ name: 'filter', ...props });
 
         // TODO: Replace with your Firebase config
         const firebaseConfig = {
